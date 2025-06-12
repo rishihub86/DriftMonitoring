@@ -1,35 +1,41 @@
 #!/bin/bash
 set -e
 
-# Parameters from environment variables
-REPO_URL="${REPO_URL:-https://github.com/your-org/k8s-manifests.git}"
-NAMESPACE="${NAMESPACE:-default}"
+echo "📥 Fetching input..."
+
+# Parameters passed via environment or args
 RESOURCE_TYPE="${RESOURCE_TYPE:-deployment}"
 RESOURCE_NAME="${RESOURCE_NAME:-my-app}"
-MANIFEST_PATH="${MANIFEST_PATH:-$NAMESPACE/$RESOURCE_NAME.yaml}"
-BRANCH="${BRANCH:-main}"
+NAMESPACE="${NAMESPACE:-default}"
+DESIRED_MANIFEST="${DESIRED_MANIFEST:-}"
 
-WORK_DIR="/tmp/k8s-manifests"
-rm -rf "$WORK_DIR"
+# Validation
+if [[ -z "$DESIRED_MANIFEST" ]]; then
+  echo "❌ Error: DESIRED_MANIFEST is empty"
+  exit 1
+fi
 
-echo "📥 Cloning $REPO_URL (branch: $BRANCH)..."
-git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$WORK_DIR"
+# Save the desired manifest
+echo "✅ Writing desired manifest to /tmp/desired.yaml"
+echo "$DESIRED_MANIFEST" > /tmp/desired.yaml
 
-echo "📡 Fetching live $RESOURCE_TYPE/$RESOURCE_NAME from $NAMESPACE namespace..."
+# Fetch the live resource from Kubernetes
+echo "📡 Fetching live manifest from cluster"
 kubectl get "$RESOURCE_TYPE" "$RESOURCE_NAME" -n "$NAMESPACE" -o yaml > /tmp/live.yaml
 
-echo "📄 Loading desired manifest from $MANIFEST_PATH..."
-cp "$WORK_DIR/$MANIFEST_PATH" /tmp/desired.yaml
+# Normalize both YAMLs
+echo "🔄 Sorting YAML files for clean diff"
+yq -P /tmp/desired.yaml > /tmp/desired_sorted.yaml
+yq -P /tmp/live.yaml > /tmp/live_sorted.yaml
 
-echo "🔍 Comparing desired and live manifests..."
-diff_output=$(diff -u /tmp/desired.yaml /tmp/live.yaml || true)
+# Perform the diff
+echo "🔍 Performing diff..."
+diff_output=$(diff -u /tmp/desired_sorted.yaml /tmp/live_sorted.yaml || true)
 
-if [ -n "$diff_output" ]; then
-  echo "🚨 Drift detected for $RESOURCE_TYPE $RESOURCE_NAME:"
-  echo "-----------------------------------------------"
+if [[ -n "$diff_output" ]]; then
+  echo "🚨 Drift Detected Between Desired and Live State:"
   echo "$diff_output"
-  echo "-----------------------------------------------"
-  exit 1
+  exit 2
 else
-  echo "✅ No drift detected for $RESOURCE_TYPE $RESOURCE_NAME."
+  echo "✅ No drift detected."
 fi
