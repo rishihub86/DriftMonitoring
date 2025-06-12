@@ -1,36 +1,26 @@
 #!/bin/bash
 set -e
 
-echo "📥 Fetching input..."
+echo "📥 Starting drift check..."
 
-# Parameters passed via environment or args
 RESOURCE_TYPE="${RESOURCE_TYPE:-deployment}"
 RESOURCE_NAME="${RESOURCE_NAME:-my-app}"
 NAMESPACE="${NAMESPACE:-default}"
 DESIRED_MANIFEST="${DESIRED_MANIFEST:-}"
 
-# Validation
 if [[ -z "$DESIRED_MANIFEST" ]]; then
-  echo "❌ Error: DESIRED_MANIFEST is empty"
+  echo "❌ Error: DESIRED_MANIFEST is not set"
   exit 1
 fi
 
-# Save the desired manifest
 echo "✅ Writing desired manifest to /tmp/desired.yaml"
 echo "$DESIRED_MANIFEST" > /tmp/desired.yaml
 
-# Fetch the live resource from Kubernetes
-echo "📡 Fetching live manifest from cluster"
+echo "📡 Fetching live manifest from Kubernetes"
 kubectl get "$RESOURCE_TYPE" "$RESOURCE_NAME" -n "$NAMESPACE" -o yaml > /tmp/live.yaml
 
-# Normalize both YAMLs
-echo "🔄 Sorting YAML files for clean diff"
-yq -P /tmp/desired.yaml > /tmp/desired_sorted.yaml
-yq -P /tmp/live.yaml > /tmp/live_sorted.yaml
-
-# Perform the diff
-echo "🔍 Performing diff..."
-diff_output=$(diff -u /tmp/desired_sorted.yaml /tmp/live_sorted.yaml || true)
+echo "🔍 Performing raw diff check..."
+diff_output=$(diff -u /tmp/desired.yaml /tmp/live.yaml || true)
 
 if [[ -n "$diff_output" ]]; then
   echo "🚨 Drift Detected Between Desired and Live State:"
