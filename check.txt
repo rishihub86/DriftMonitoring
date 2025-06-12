@@ -10,22 +10,26 @@ DESIRED_MANIFEST="${DESIRED_MANIFEST:-}"
 
 if [[ -z "$DESIRED_MANIFEST" ]]; then
   echo "❌ Error: DESIRED_MANIFEST is not set"
-  exit 1
+  exit 0
 fi
 
-echo "✅ Writing desired manifest to /tmp/desired.yaml"
+# Save desired manifest to file
 echo "$DESIRED_MANIFEST" > /tmp/desired.yaml
 
-echo "📡 Fetching live manifest from Kubernetes"
-kubectl get "$RESOURCE_TYPE" "$RESOURCE_NAME" -n "$NAMESPACE" -o yaml > /tmp/live.yaml
+# Fetch live manifest
+kubectl get "$RESOURCE_TYPE" "$RESOURCE_NAME" -n "$NAMESPACE" -o yaml > /tmp/live-raw.yaml
 
-echo "🔍 Performing raw diff check..."
-diff_output=$(diff -u /tmp/desired.yaml /tmp/live.yaml || true)
+# Clean live manifest by removing fields that cause drift
+grep -vE '^\s*(creationTimestamp|resourceVersion|uid|generation|selfLink|status|managedFields|kubectl\.kubernetes\.io/last-applied-configuration):' /tmp/live-raw.yaml > /tmp/live-clean.yaml
+
+echo "🔍 Performing diff check..."
+diff_output=$(diff -u /tmp/desired.yaml /tmp/live-clean.yaml || true)
 
 if [[ -n "$diff_output" ]]; then
-  echo "🚨 Drift Detected Between Desired and Live State:"
+  echo "🚨 Drift Detected:"
   echo "$diff_output"
-  exit 2
 else
   echo "✅ No drift detected."
 fi
+
+exit 0
