@@ -9,10 +9,13 @@ spec:
       restartPolicy: Never
       containers:
         - name: drift-check
-          image: your-registry/your-drift-check-image:latest
-          command: ["/bin/bash", "-c"]
+          image: your-custom-image:latest
+          command: ["/bin/bash"]
           args:
+            - -c
             - |
+              echo "🚀 Running drift check..." && \
+              chmod +x /scripts/drift-check.sh && \
               /scripts/drift-check.sh
           env:
             - name: RESOURCE_TYPE
@@ -22,7 +25,13 @@ spec:
             - name: NAMESPACE
               value: "default"
             - name: DESIRED_MANIFEST
-              valueFrom:
-                secretKeyRef:
-                  name: manifest-secret
-                  key: desired.yaml
+              value: "${ parameters.DESIRED_MANIFEST }"
+          volumeMounts:
+            - name: script-vol
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: script-vol
+          configMap:
+            name: drift-check-script
+            defaultMode: 0755
