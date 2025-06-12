@@ -3,23 +3,27 @@ set -e
 
 echo "🔧 Starting Kubernetes drift check..."
 
-# Save the Git (desired) manifest from env var (Spinnaker injects this)
+# Read namespace from env variable (passed from Spinnaker)
+NAMESPACE=${NAMESPACE:-default}
+
+# Save the Git (desired) manifest from env variable
 echo "$MANIFEST" > /tmp/desired.yaml
 
 # Split into multiple files if multi-resource
 csplit -z -f /tmp/desired_ /tmp/desired.yaml '/^---$/' '{*}'
 
 drift_found=0
+mkdir -p /output
+> /output/drift-report.txt
 
 for f in /tmp/desired_*; do
   kind=$(awk '/^kind:/ { print $2; exit }' "$f")
   name=$(awk '/^metadata:/,0 { if ($1 == "name:") { print $2; exit } }' "$f")
-  ns=$(awk '/^metadata:/,0 { if ($1 == "namespace:") { print $2; exit } }' "$f")
-  [ -z "$ns" ] && ns="default"
 
-  echo "🔍 Checking $kind/$name in namespace $ns"
+  echo "🔍 Checking $kind/$name in namespace $NAMESPACE"
 
-  kubectl get "$kind" "$name" -n "$ns" -o yaml > /tmp/live-raw.yaml
+  # Get the live manifest and clean it
+  kubectl get "$kind" "$name" -n "$NAMESPACE" -o yaml > /tmp/live-raw.yaml
 
   awk '
     BEGIN { skip=0 }
@@ -32,19 +36,19 @@ for f in /tmp/desired_*; do
     { print }
   ' /tmp/live-raw.yaml > /tmp/live-clean.yaml
 
-  echo "📄 Diff for $kind/$name:"
-  if ! diff -u "$f" /tmp/live-clean.yaml; then
+  echo -e "\n🔹 Diff for $kind/$name in $NAMESPACE:" | tee -a /output/drift-report.txt
+  if ! diff -u "$f" /tmp/live-clean.yaml | tee -a /output/drift-report.txt; then
     drift_found=1
+  else
+    echo "✅ No drift for $kind/$name" | tee -a /output/drift-report.txt
   fi
 done
 
-echo "🧪 Drift analysis completed"
+echo "🧪 Drift analysis completed" | tee -a /output/drift-report.txt
 
-mkdir -p /output
+# Save status for downstream stages
 if [ "$drift_found" -eq 1 ]; then
-  echo "driftDetected=true" > /output/drift-status.txt
-  echo "🚨 Drift detected!"
+  echo "driftDetected=true" | tee /output/drift-status.txt
 else
-  echo "driftDetected=false" > /output/drift-status.txt
-  echo "✅ No drift found."
+  echo "driftDetected=false" | tee /output/drift-status.txt
 fi
