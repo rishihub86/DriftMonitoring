@@ -1,0 +1,50 @@
+#!/bin/bash
+set -e
+
+echo "🔧 Starting Kubernetes drift check..."
+
+# Save the Git (desired) manifest from env var (Spinnaker injects this)
+echo "$MANIFEST" > /tmp/desired.yaml
+
+# Split into multiple files if multi-resource
+csplit -z -f /tmp/desired_ /tmp/desired.yaml '/^---$/' '{*}'
+
+drift_found=0
+
+for f in /tmp/desired_*; do
+  kind=$(awk '/^kind:/ { print $2; exit }' "$f")
+  name=$(awk '/^metadata:/,0 { if ($1 == "name:") { print $2; exit } }' "$f")
+  ns=$(awk '/^metadata:/,0 { if ($1 == "namespace:") { print $2; exit } }' "$f")
+  [ -z "$ns" ] && ns="default"
+
+  echo "🔍 Checking $kind/$name in namespace $ns"
+
+  kubectl get "$kind" "$name" -n "$ns" -o yaml > /tmp/live-raw.yaml
+
+  awk '
+    BEGIN { skip=0 }
+    /^\s*(status|annotations|labels|managedFields|conditions):/ { skip=1; next }
+    skip && /^[^[:space:]]/ { skip=0 }
+    skip { next }
+
+    /^\s*(creationTimestamp|resourceVersion|uid|generation|observedGeneration|replicas|availableReplicas|readyReplicas|updatedReplicas|selfLink):/ { next }
+
+    { print }
+  ' /tmp/live-raw.yaml > /tmp/live-clean.yaml
+
+  echo "📄 Diff for $kind/$name:"
+  if ! diff -u "$f" /tmp/live-clean.yaml; then
+    drift_found=1
+  fi
+done
+
+echo "🧪 Drift analysis completed"
+
+mkdir -p /output
+if [ "$drift_found" -eq 1 ]; then
+  echo "driftDetected=true" > /output/drift-status.txt
+  echo "🚨 Drift detected!"
+else
+  echo "driftDetected=false" > /output/drift-status.txt
+  echo "✅ No drift found."
+fi
