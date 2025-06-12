@@ -13,16 +13,31 @@ if [[ -z "$DESIRED_MANIFEST" ]]; then
   exit 0
 fi
 
-# Save desired manifest to file
+# Save desired manifest
 echo "$DESIRED_MANIFEST" > /tmp/desired.yaml
 
-# Fetch live manifest
+# Get the live manifest
 kubectl get "$RESOURCE_TYPE" "$RESOURCE_NAME" -n "$NAMESPACE" -o yaml > /tmp/live-raw.yaml
 
-# Clean live manifest by removing fields that cause drift
-grep -vE '^\s*(creationTimestamp|resourceVersion|uid|generation|selfLink|status|managedFields|kubectl\.kubernetes\.io/last-applied-configuration):' /tmp/live-raw.yaml > /tmp/live-clean.yaml
+# Clean live manifest by removing dynamic/runtime metadata and status fields
+sed \
+  -e '/^ *annotations:/,/^[^ ]/d' \
+  -e '/^ *labels:/,/^[^ ]/d' \
+  -e '/^ *managedFields:/,/^[^ ]/d' \
+  -e '/^ *status:/,/^[^ ]/d' \
+  -e '/^ *conditions:/,/^[^ ]/d' \
+  -e '/^ *creationTimestamp:.*$/d' \
+  -e '/^ *resourceVersion:.*$/d' \
+  -e '/^ *uid:.*$/d' \
+  -e '/^ *generation:.*$/d' \
+  -e '/^ *observedGeneration:.*$/d' \
+  -e '/^ *replicas:.*$/d' \
+  -e '/^ *availableReplicas:.*$/d' \
+  -e '/^ *readyReplicas:.*$/d' \
+  -e '/^ *updatedReplicas:.*$/d' \
+  /tmp/live-raw.yaml > /tmp/live-clean.yaml
 
-echo "🔍 Performing diff check..."
+echo "🔍 Performing drift diff check..."
 diff_output=$(diff -u /tmp/desired.yaml /tmp/live-clean.yaml || true)
 
 if [[ -n "$diff_output" ]]; then
