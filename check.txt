@@ -1,0 +1,36 @@
+#!/bin/bash
+set -e
+
+# Get parameters from environment variables
+REPO_URL="${REPO_URL:-https://github.com/your-org/k8s-manifests.git}"
+NAMESPACE="${NAMESPACE:-default}"
+RESOURCE_TYPE="${RESOURCE_TYPE:-deployment}"
+RESOURCE_NAME="${RESOURCE_NAME:-my-app}"
+MANIFEST_PATH="${MANIFEST_PATH:-$NAMESPACE/$RESOURCE_NAME.yaml}"
+BRANCH="${BRANCH:-main}"
+
+# Workspace
+WORK_DIR="/tmp/k8s-manifests"
+rm -rf "$WORK_DIR"
+
+# Clone desired state
+git clone --branch "$BRANCH" "$REPO_URL" "$WORK_DIR"
+
+# Get live state from cluster
+kubectl get "$RESOURCE_TYPE" "$RESOURCE_NAME" -n "$NAMESPACE" -o yaml > /tmp/live.yaml
+
+# Get desired state from Git
+cp "$WORK_DIR/$MANIFEST_PATH" /tmp/desired.yaml
+
+# Compare
+echo "Comparing live state with desired state..."
+diff_output=$(diff -u /tmp/desired.yaml /tmp/live.yaml || true)
+
+if [ -n "$diff_output" ]; then
+  echo "❌ Drift detected for $RESOURCE_NAME in namespace $NAMESPACE"
+  echo "$diff_output"
+  echo "$diff_output" | mail -s "Drift Alert: $RESOURCE_NAME" "$ALERT_EMAIL"
+  exit 1
+else
+  echo "✅ No drift detected"
+fi
