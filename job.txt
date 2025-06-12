@@ -1,0 +1,28 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: drift-check-job
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: drift-check
+          image: your-registry/your-drift-check-image:latest
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              /scripts/drift-check.sh
+          env:
+            - name: RESOURCE_TYPE
+              value: "deployment"
+            - name: RESOURCE_NAME
+              value: "my-app"
+            - name: NAMESPACE
+              value: "default"
+            - name: DESIRED_MANIFEST
+              valueFrom:
+                secretKeyRef:
+                  name: manifest-secret
+                  key: desired.yaml
